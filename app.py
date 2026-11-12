@@ -7,7 +7,7 @@ from collections import Counter
 from functools import wraps
 
 import qrcode
-from flask import Flask, abort, jsonify, redirect, render_template, request, send_file, session, url_for
+from flask import Flask, abort, jsonify, redirect, render_template, request, send_file, send_from_directory, session, url_for
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", secrets.token_hex(32))
@@ -59,7 +59,7 @@ def teacher():
 @app.get("/lezione")
 def lesson():
     if "student_id" not in session:session["student_id"]=secrets.token_urlsafe(24)
-    return render_template("lesson.html")
+    return send_from_directory(app.template_folder, "lesson.html", mimetype="text/html")
 
 @app.get("/qr")
 def qr():
@@ -94,42 +94,3 @@ def answer():
     with lock:
         q=QMAP.get(state["id"])
         if not q or not state["open"] or d.get("id")!=q["id"]:return jsonify(error="Domanda chiusa o non attiva."),409
-        if sid in state["answers"]:return jsonify(error="Hai già risposto a questa domanda."),409
-        i=d.get("index")
-        if type(i) is not int or i<0 or i>=len(q["options"]):return jsonify(error="Risposta non valida."),400
-        state["answers"][sid]=i
-    return jsonify(ok=True)
-
-@app.get("/api/teacher/state")
-@teacher_only
-def teacher_state():
-    with lock:
-        q=QMAP.get(state["id"])
-        counts=Counter(state["answers"].values())
-        return jsonify(question=q,open=state["open"],reveal=state["reveal"],
-                       counts=[counts[i] for i in range(len(q["options"]))] if q else [],
-                       total=len(state["answers"]),
-                       online=sum(time.time()-t<45 for t in state["seen"].values()))
-
-@app.post("/api/teacher/action")
-@teacher_only
-def teacher_action():
-    d=request.get_json(silent=True) or {}
-    a=d.get("action")
-    with lock:
-        if a=="open":
-            if d.get("id") not in QMAP:return jsonify(error="Domanda sconosciuta."),400
-            state.update(id=d["id"],open=True,reveal=False,answers={})
-        elif a=="close":state["open"]=False
-        elif a=="reveal":state["open"]=False;state["reveal"]=True
-        elif a=="clear":state.update(id=None,open=False,reveal=False,answers={})
-        elif a=="reset":state["answers"]={}
-        elif a=="new":state.update(id=None,open=False,reveal=False,answers={},seen={},generation=secrets.token_hex(8))
-        else:return jsonify(error="Azione non valida."),400
-    return jsonify(ok=True)
-
-@app.get("/health")
-def health():return "ok",200
-
-if __name__=="__main__":
-    app.run(host="0.0.0.0",port=int(os.getenv("PORT","10000")))
